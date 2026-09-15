@@ -1,53 +1,102 @@
-import yfinance as yf
-import pandas as pd
-import numpy as np
 import json
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
 
 def update_market_data():
-    sp500 = yf.download("^GSPC", period="2y")
-    close = sp500["Close"]["^GSPC"] if isinstance(sp500.columns, pd.MultiIndex) else sp500["Close"]
+    # 抓取 10 年历史数据以支持胜率分桶与分位数
+    df = yf.download("^GSPC", period="10y", interval="1d")
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df["Close"].to_frame(name="Close")
 
-    sma60 = close.rolling(60).mean()
-    sma200 = close.rolling(200).mean()
-    log_dev60 = np.log(close / sma60)
-    log_dev200 = np.log(close / sma200)
+    df["SMA_60"] = df["Close"].rolling(60).mean()
+    df["SMA_200"] = df["Close"].rolling(200).mean()
 
-    latest_price = float(close.iloc[-1])
-    latest_ld60 = float(log_dev60.iloc[-1])
-    latest_ld200 = float(log_dev200.iloc[-1])
-    latest_date = sp500.index[-1].strftime("%Y-%m-%d")
+    df["BIAS_60"] = np.log(df["Close"] / df["SMA_60"])
+    df["BIAS_200"] = np.log(df["Close"] / df["SMA_200"])
 
-    # 判定规则与历史概率统计
-    if latest_ld200 > -0.08 and latest_ld60 < -0.0639:
-        status, win_rate, color = "💡 触发【牛市回调抄底】", "60.0% (20日反弹胜率)", "text-green-400"
-    elif latest_ld200 > 0.1414:
-        status, win_rate, color = "⚠️ 触发【高位发散预警】", "56.4% (60日回撤概率)", "text-red-400"
-    else:
-        status, win_rate, color = "✅ 正常区间震荡", "44.7% (常态胜率)", "text-blue-400"
+    # 计算未来收益率用于胜率分桶
+    df["Fwd_20d"] = df["Close"].shift(-20) / df["Close"] - 1
+    df["Fwd_60d"] = df["Close"].shift(-60) / df["Close"] - 1
+    df["Fwd_252d"] = df["Close"].shift(-252) / df["Close"] - 1
 
+    clean_df = df.dropna(subset=["BIAS_60", "BIAS_200"])
+
+    curr_p = float(clean_df["Close"].iloc[-1])
+    curr_b60 = float(clean_df["BIAS_60"].iloc[-1])
+    curr_b200 = float(clean_df["BIAS_200"].iloc[-1])
+    curr_date = clean_df.index[-1].strftime("%Y-%m-%d")
+
+    # 历史分位数
+    pct_60 = float((clean_df["BIAS_60"] <= curr_b60).mean() * 100)
+    pct_200 = float((clean_df["BIAS_200"] <= curr_b200).mean() * 100)
+
+    # 距临界值百分点
+    dist_60_oversold = (-0.08 - curr_b60) * 100
+    dist_60_overbought = (0.08 - curr_b60) * 100
+    dist_200_oversold = (-0.15 - curr_b200) * 100
+    dist_200_bubble = (0.16 - curr_b200) * 100
+
+    # 200日偏离度 5% 步长历史分桶
+    bucket_floor = float(np.floor(curr_b200 * 20) / 20.0)
+    bucket_ceil = bucket_floor + 0.05
+    bucket_df = clean_df[
+        (clean_df["BIAS_200"] >= bucket_floor)
+        & (clean_df["BIAS_200"] < bucket_ceil)
+    ]
+
+    valid_bucket = bucket_df.dropna(subset=["Fwd_20d"])
+    win_20d = (
+        float((valid_bucket["Fwd_20d"] > 0).mean() * 100)
+        if len(valid_bucket) > 0
+        else 0
+    )
+    win_60d = (
+        float((valid_bucket["Fwd_60d"] > 0).mean() * 100)
+        if len(valid_bucket) > 0
+        else 0
+    )
+    win_1y = (
+        float((valid_bucket["Fwd_252d"] > 0).mean() * 100)
+        if len(valid_bucket) > 0
+        else 0
+    )
+
+    # 提取近 120 日趋势图数据
+    recent = clean_df.tail(120)
     history = []
-    recent_df = pd.DataFrame({"price": close, "dev60": log_dev60, "dev200": log_dev200}).dropna().tail(120)
-    for date, row in recent_df.iterrows():
-        history.append({
-            "date": date.strftime("%Y-%m-%d"),
-            "price": round(float(row["price"]), 2),
-            "dev60": round(float(row["dev60"]), 4),
-            "dev200": round(float(row["dev200"]), 4)
-        })
+    for date, row in recent.iterrows():
+        history.append(
+            {
+                "date": date.strftime("%Y-%m-%d"),
+                "bias_60": round(float(row["BIAS_60"]), 4),
+                "bias_200": round(float(row["BIAS_200"]), 4),
+            }
+        )
 
-    data = {
-        "updated_at": latest_date,
-        "price": round(latest_price, 2),
-        "dev60": round(latest_ld60, 4),
-        "dev200": round(latest_ld200, 4),
-        "status": status,
-        "win_rate": win_rate,
-        "color": color,
-        "history": history
+    output = {
+        "update_date": curr_date,
+        "close": round(curr_p, 2),
+        "bias_60": round(curr_b60, 4),
+        "bias_200": round(curr_b200, 4),
+        "pct_60": round(pct_60, 1),
+        "pct_200": round(pct_200, 1),
+        "dist_60_oversold": round(dist_60_oversold, 2),
+        "dist_60_overbought": round(dist_60_overbought, 2),
+        "dist_200_oversold": round(dist_200_oversold, 2),
+        "dist_200_bubble": round(dist_200_bubble, 2),
+        "bucket_range": f"{bucket_floor*100:+.0f}% ~ {bucket_ceil*100:+.0f}%",
+        "sample_cnt": len(valid_bucket),
+        "win_20d": round(win_20d, 1),
+        "win_60d": round(win_60d, 1),
+        "win_1y": round(win_1y, 1),
+        "history": history,
     }
 
-    with open("data.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open("data.json", "w") as f:
+        json.dump(output, f, indent=2)
+
 
 if __name__ == "__main__":
     update_market_data()
