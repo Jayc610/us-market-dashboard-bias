@@ -7,21 +7,27 @@ import yfinance as yf
 def update_market_data():
     # 抓取 10 年历史数据以支持胜率分桶与分位数
     df = yf.download("^GSPC", period="10y", interval="1d")
+
+    # 兼容新旧版本 yfinance 的数据结构处理
     if isinstance(df.columns, pd.MultiIndex):
-        df = df["Close"].to_frame(name="Close")
+        close_series = df["Close"].iloc[:, 0]
+    else:
+        close_series = df["Close"]
 
-    df["SMA_60"] = df["Close"].rolling(60).mean()
-    df["SMA_200"] = df["Close"].rolling(200).mean()
+    clean_df = pd.DataFrame({"Close": close_series}).dropna()
 
-    df["BIAS_60"] = np.log(df["Close"] / df["SMA_60"])
-    df["BIAS_200"] = np.log(df["Close"] / df["SMA_200"])
+    clean_df["SMA_60"] = clean_df["Close"].rolling(60).mean()
+    clean_df["SMA_200"] = clean_df["Close"].rolling(200).mean()
+
+    clean_df["BIAS_60"] = np.log(clean_df["Close"] / clean_df["SMA_60"])
+    clean_df["BIAS_200"] = np.log(clean_df["Close"] / clean_df["SMA_200"])
 
     # 计算未来收益率用于胜率分桶
-    df["Fwd_20d"] = df["Close"].shift(-20) / df["Close"] - 1
-    df["Fwd_60d"] = df["Close"].shift(-60) / df["Close"] - 1
-    df["Fwd_252d"] = df["Close"].shift(-252) / df["Close"] - 1
+    clean_df["Fwd_20d"] = clean_df["Close"].shift(-20) / clean_df["Close"] - 1
+    clean_df["Fwd_60d"] = clean_df["Close"].shift(-60) / clean_df["Close"] - 1
+    clean_df["Fwd_252d"] = clean_df["Close"].shift(-252) / clean_df["Close"] - 1
 
-    clean_df = df.dropna(subset=["BIAS_60", "BIAS_200"])
+    clean_df = clean_df.dropna(subset=["BIAS_60", "BIAS_200"])
 
     curr_p = float(clean_df["Close"].iloc[-1])
     curr_b60 = float(clean_df["BIAS_60"].iloc[-1])
