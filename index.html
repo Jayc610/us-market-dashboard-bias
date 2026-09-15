@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>美股风险偏离度实时看板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-6 font-sans">
+    <div class="max-w-5xl mx-auto space-y-6">
+        <header class="flex justify-between items-center border-b border-gray-800 pb-4">
+            <h1 class="text-2xl font-bold">📈 标普500 风险偏离度与择时面板</h1>
+            <span id="updated" class="text-sm text-gray-400">更新中...</span>
+        </header>
+
+        <!-- 卡片逻辑区域 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="text-gray-400 text-sm">最新收盘价</div>
+                <div id="price" class="text-2xl font-bold mt-1">--</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="text-gray-400 text-sm">60日对数偏离度</div>
+                <div id="dev60" class="text-2xl font-bold mt-1">--</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="text-gray-400 text-sm">200日对数偏离度</div>
+                <div id="dev200" class="text-2xl font-bold mt-1">--</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="text-gray-400 text-sm">择时胜率参考</div>
+                <div id="winrate" class="text-lg font-bold mt-1">--</div>
+            </div>
+        </div>
+
+        <!-- 状态诊断通知条 -->
+        <div id="status-card" class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-lg font-bold">
+            当前状态：<span id="status">加载中...</span>
+        </div>
+
+        <!-- 交互折线图表 -->
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+            <h2 class="text-lg font-semibold mb-4">近 120 日偏离度走势</h2>
+            <div id="chart" class="w-full h-80"></div>
+        </div>
+    </div>
+
+    <script>
+        fetch('./data.json?v=' + new Date().getTime())
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('updated').innerText = '数据更新于: ' + data.updated_at;
+                document.getElementById('price').innerText = '$' + data.price;
+                document.getElementById('dev60').innerText = data.dev60;
+                document.getElementById('dev200').innerText = data.dev200;
+                document.getElementById('winrate').innerText = data.win_rate;
+                
+                const statusEl = document.getElementById('status');
+                statusEl.innerText = data.status;
+                statusEl.className = data.color;
+
+                // 渲染 ECharts 折线图
+                const chart = echarts.init(document.getElementById('chart'), 'dark');
+                chart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'axis' },
+                    legend: { data: ['60日偏离度', '200日偏离度'] },
+                    xAxis: { type: 'category', data: data.history.map(x => x.date) },
+                    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151' } } },
+                    series: [
+                        { name: '60日偏离度', type: 'line', data: data.history.map(x => x.dev60), color: '#38bdf8' },
+                        { name: '200日偏离度', type: 'line', data: data.history.map(x => x.dev200), color: '#f43f5e' }
+                    ]
+                });
+            });
+    </script>
+</body>
+</html>
