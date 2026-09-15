@@ -1,78 +1,124 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>美股风险偏离度实时看板</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <meta charset="UTF-8">
+  <title>标普500 风险偏离度与择时面板</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+    .card { background-color: #1e293b; border-radius: 8px; padding: 16px; border: 1px solid #334155; }
+    .card-title { font-size: 13px; color: #94a3b8; font-weight: bold; }
+    .card-value { font-size: 24px; font-weight: bold; margin-top: 8px; color: #38bdf8; }
+    .sub-text { font-size: 13px; color: #cbd5e1; margin: 8px 0; }
+    .stat-badge { background: #334155; padding: 4px 8px; border-radius: 4px; font-family: monospace; }
+    .chart-box { background-color: #1e293b; border-radius: 8px; padding: 20px; border: 1px solid #334155; }
+  </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen p-6 font-sans">
-    <div class="max-w-5xl mx-auto space-y-6">
-        <header class="flex justify-between items-center border-b border-gray-800 pb-4">
-            <h1 class="text-2xl font-bold">📈 标普500 风险偏离度与择时面板</h1>
-            <span id="updated" class="text-sm text-gray-400">更新中...</span>
-        </header>
-
-        <!-- 卡片逻辑区域 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm">最新收盘价</div>
-                <div id="price" class="text-2xl font-bold mt-1">--</div>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm">60日对数偏离度</div>
-                <div id="dev60" class="text-2xl font-bold mt-1">--</div>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm">200日对数偏离度</div>
-                <div id="dev200" class="text-2xl font-bold mt-1">--</div>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm">择时胜率参考</div>
-                <div id="winrate" class="text-lg font-bold mt-1">--</div>
-            </div>
-        </div>
-
-        <!-- 状态诊断通知条 -->
-        <div id="status-card" class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-lg font-bold">
-            当前状态：<span id="status">加载中...</span>
-        </div>
-
-        <!-- 交互折线图表 -->
-        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
-            <h2 class="text-lg font-semibold mb-4">近 120 日偏离度走势</h2>
-            <div id="chart" class="w-full h-80"></div>
-        </div>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>📈 标普500 风险偏离度与择时面板</h2>
+      <div style="color: #94a3b8; font-size: 14px;">数据更新于: <span id="update-date">-</span></div>
     </div>
 
-    <script>
-        fetch('./data.json?v=' + new Date().getTime())
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('updated').innerText = '数据更新于: ' + data.updated_at;
-                document.getElementById('price').innerText = '$' + data.price;
-                document.getElementById('dev60').innerText = data.dev60;
-                document.getElementById('dev200').innerText = data.dev200;
-                document.getElementById('winrate').innerText = data.win_rate;
-                
-                const statusEl = document.getElementById('status');
-                statusEl.innerText = data.status;
-                statusEl.className = data.color;
+    <!-- 第一排：核心数据卡片 -->
+    <div class="grid">
+      <div class="card"><div class="card-title">最新收盘价</div><div class="card-value" id="close-price">-</div></div>
+      <div class="card"><div class="card-title">60日对数偏离度</div><div class="card-value" id="bias-60">-</div></div>
+      <div class="card"><div class="card-title">200日对数偏离度</div><div class="card-value" id="bias-200">-</div></div>
+      <div class="card"><div class="card-title">分桶胜率 (20天)</div><div class="card-value" id="win-20d-top">-</div></div>
+    </div>
 
-                // 渲染 ECharts 折线图
-                const chart = echarts.init(document.getElementById('chart'), 'dark');
-                chart.setOption({
-                    backgroundColor: 'transparent',
-                    tooltip: { trigger: 'axis' },
-                    legend: { data: ['60日偏离度', '200日偏离度'] },
-                    xAxis: { type: 'category', data: data.history.map(x => x.date) },
-                    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151' } } },
-                    series: [
-                        { name: '60日偏离度', type: 'line', data: data.history.map(x => x.dev60), color: '#38bdf8' },
-                        { name: '200日偏离度', type: 'line', data: data.history.map(x => x.dev200), color: '#f43f5e' }
-                    ]
-                });
-            });
-    </script>
+    <!-- 第二排：精细化指标 & 历史统计 -->
+    <div class="two-col">
+      <div class="card">
+        <h3>🎯 距临界值剩余距离 & 分位数</h3>
+        <hr style="border-color: #334155;">
+        <p class="sub-text"><b>60日偏离度：</b> 所选区间分位第 <span class="stat-badge" id="pct-60">-</span></p>
+        <p class="sub-text">距波段超卖线 (-8%)：<b id="dist-60-oversold" style="color: #4ade80;">-</b></p>
+        <p class="sub-text">距短线超买线 (+8%)：<b id="dist-60-overbought" style="color: #f87171;">-</b></p>
+        <br>
+        <p class="sub-text"><b>200日偏离度：</b> 所选区间分位第 <span class="stat-badge" id="pct-200">-</span></p>
+        <p class="sub-text">距深度负偏离线 (-15%)：<b id="dist-200-oversold" style="color: #4ade80;">-</b></p>
+        <p class="sub-text">距泡沫警戒线 (+16%)：<b id="dist-200-bubble" style="color: #f87171;">-</b></p>
+      </div>
+
+      <div class="card">
+        <h3>📊 当前读数的历史统计定位</h3>
+        <hr style="border-color: #334155;">
+        <p class="sub-text"><b>常态区间（200日偏离度分桶）：</b> <span class="stat-badge" id="bucket-range">-</span></p>
+        <p class="sub-text">历史近 10 年符合该区间的样本数：<b id="sample-cnt">-</b> 个交易日</p>
+        <div style="display: flex; justify-content: space-between; margin-top: 15px; text-align: center;">
+          <div><div class="card-title">20天上涨概率</div><div style="font-size: 18px; font-weight: bold; color: #38bdf8;" id="win-20d">-</div></div>
+          <div><div class="card-title">60天上涨概率</div><div style="font-size: 18px; font-weight: bold; color: #38bdf8;" id="win-60d">-</div></div>
+          <div><div class="card-title">1年上涨概率</div><div style="font-size: 18px; font-weight: bold; color: #38bdf8;" id="win-1y">-</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 第三排：走势图表 -->
+    <div class="chart-box">
+      <h3>📉 近 120 日偏离度走势</h3>
+      <canvas id="biasChart" height="100"></canvas>
+    </div>
+  </div>
+
+  <script>
+    async function loadDashboard() {
+      const res = await fetch('data.json');
+      const data = await res.json();
+
+      document.getElementById('update-date').innerText = data.update_date;
+      document.getElementById('close-price').innerText = '$' + data.close;
+      document.getElementById('bias-60').innerText = (data.bias_60 * 100).toFixed(2) + '%';
+      document.getElementById('bias-200').innerText = (data.bias_200 * 100).toFixed(2) + '%';
+      document.getElementById('win-20d-top').innerText = data.win_20d + '%';
+
+      document.getElementById('pct-60').innerText = data.pct_60 + '%';
+      document.getElementById('pct-200').innerText = data.pct_200 + '%';
+
+      document.getElementById('dist-60-oversold').innerText = data.dist_60_oversold < 0 ? `还需再跌 ${Math.abs(data.dist_60_oversold)} 个百分点` : '已触发超卖';
+      document.getElementById('dist-60-overbought').innerText = data.dist_60_overbought > 0 ? `还需再涨 ${data.dist_60_overbought} 个百分点` : '已触发超买';
+
+      document.getElementById('dist-200-oversold').innerText = data.dist_200_oversold < 0 ? `还需再跌 ${Math.abs(data.dist_200_oversold)} 个百分点` : '已破位';
+      document.getElementById('dist-200-bubble').innerText = data.dist_200_bubble > 0 ? `还需再涨 ${data.dist_200_bubble} 个百分点` : '处于泡沫区';
+
+      document.getElementById('bucket-range').innerText = data.bucket_range;
+      document.getElementById('sample-cnt').innerText = data.sample_cnt;
+      document.getElementById('win-20d').innerText = data.win_20d + '%';
+      document.getElementById('win-60d').innerText = data.win_60d + '%';
+      document.getElementById('win-1y').innerText = data.win_1y + '%';
+
+      // 渲染 Chart.js 折线图
+      const labels = data.history.map(item => item.date);
+      const b60Data = data.history.map(item => item.bias_60);
+      const b200Data = data.history.map(item => item.bias_200);
+
+      new Chart(document.getElementById('biasChart'), {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: '60日偏离度', data: b60Data, borderColor: '#00B4D8', borderWidth: 2, pointRadius: 0 },
+            { label: '200日偏离度', data: b200Data, borderColor: '#FF4B4B', borderWidth: 2, pointRadius: 0 }
+          ]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+          },
+          plugins: { legend: { labels: { color: '#f8fafc' } } }
+        }
+      });
+    }
+    loadDashboard();
+  </script>
 </body>
 </html>
